@@ -1,2 +1,3 @@
-# ssf
-Safe share files
+# SSF
+
+Safe share files.
