@@ -23,8 +23,10 @@ func Encrypt(plainText []byte, key []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("new encrypt cipher: %w", err)
 	}
+
 	cipherText := make([]byte, aes.BlockSize+len(plainText))
 	iv := cipherText[:aes.BlockSize]
+
 	if _, err = io.ReadFull(rand.Reader, iv); err != nil {
 		return nil, fmt.Errorf("iv random generation: %w", err)
 	}
@@ -47,6 +49,7 @@ func Decrypt(cipherText []byte, key []byte) ([]byte, error) {
 	}
 	iv := cipherText[:aes.BlockSize]
 	cipherText = cipherText[aes.BlockSize:]
+
 	stream := cipher.NewCFBDecrypter(block, iv)
 	stream.XORKeyStream(cipherText, cipherText)
 	return cipherText, nil
