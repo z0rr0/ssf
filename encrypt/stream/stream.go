@@ -20,7 +20,7 @@ func Encrypt(src io.Reader, dst io.Writer, key []byte) error {
 	stream := cipher.NewOFB(block, iv[:])
 
 	writer := &cipher.StreamWriter{S: stream, W: dst}
-	if _, err := io.Copy(writer, src); err != nil {
+	if _, err = io.Copy(writer, src); err != nil {
 		return fmt.Errorf("copy for ecryption: %w", err)
 	}
 	return nil
@@ -37,7 +37,7 @@ func Decrypt(src io.Reader, dst io.Writer, key []byte) error {
 	stream := cipher.NewOFB(block, iv[:])
 
 	reader := &cipher.StreamReader{S: stream, R: src}
-	if _, err := io.Copy(dst, reader); err != nil {
+	if _, err = io.Copy(dst, reader); err != nil {
 		return fmt.Errorf("copy for decryption: %dst", err)
 	}
 	return nil

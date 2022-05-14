@@ -25,7 +25,7 @@ func Encrypt(plainText []byte, key []byte) ([]byte, error) {
 	}
 	cipherText := make([]byte, aes.BlockSize+len(plainText))
 	iv := cipherText[:aes.BlockSize]
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+	if _, err = io.ReadFull(rand.Reader, iv); err != nil {
 		return nil, fmt.Errorf("iv random generation: %w", err)
 	}
 	stream := cipher.NewCFBEncrypter(block, iv)
