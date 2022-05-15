@@ -34,22 +34,30 @@ const (
 	hashLength = 32
 )
 
-// ErrSecret is an error when the secret hash is incorrect.
-var ErrSecret = errors.New("failed secret")
+var (
+	// ErrSecret is an error when the secret hash is incorrect.
+	ErrSecret = errors.New("failed secret")
+
+	// ErrHash is an error when the hash is incorrect.
+	ErrHash = errors.New("failed singer hash")
+)
 
 // Msg is struct with base parameter/results of encryption/decryption.
 type Msg struct {
-	Salt  string
-	Value string
-	Hash  string
-	s     []byte
-	v     []byte
-	h     []byte
+	Salt     string
+	Value    string
+	KeyHash  string
+	DataHash string
+	s        []byte
+	v        []byte
+	kh       []byte
+	dh       []byte
 }
 
 func (m *Msg) encode(withValue bool) {
 	m.Salt = hex.EncodeToString(m.s)
-	m.Hash = hex.EncodeToString(m.h)
+	m.KeyHash = hex.EncodeToString(m.kh)
+	m.DataHash = hex.EncodeToString(m.dh)
 	if withValue {
 		m.Value = hex.EncodeToString(m.v)
 	}
@@ -62,11 +70,17 @@ func (m *Msg) decode(withValue bool) error {
 	}
 	m.s = b
 
-	b, err = hex.DecodeString(m.Hash)
+	b, err = hex.DecodeString(m.KeyHash)
 	if err != nil {
-		return fmt.Errorf("hex decode hash: %w", err)
+		return fmt.Errorf("hex decode key hash: %w", err)
 	}
-	m.h = b
+	m.kh = b
+
+	b, err = hex.DecodeString(m.DataHash)
+	if err != nil {
+		return fmt.Errorf("hex decode data hash: %w", err)
+	}
+	m.dh = b
 
 	if withValue {
 		b, err = hex.DecodeString(m.Value)
@@ -76,6 +90,82 @@ func (m *Msg) decode(withValue bool) error {
 		m.v = b
 	}
 	return nil
+}
+
+// StreamSigner is a wrapper for stream Read/Write and hash sum calculations together.
+type StreamSigner struct {
+	R     io.Reader
+	W     io.Writer
+	rHash sha3.ShakeHash
+	wHash sha3.ShakeHash
+	rDone bool
+	wDone bool
+}
+
+// Read reads data from s.R. It's used for stream encryption.
+func (s *StreamSigner) Read(p []byte) (n int, err error) {
+	n, err = s.R.Read(p)
+	if err != nil {
+		return 0, err
+	}
+	_, err = s.rHash.Write(p[:n])
+	if err != nil {
+		return 0, err
+	}
+	s.rDone = s.rDone || n > 0
+	return n, nil
+}
+
+// Write writes data to s.W. It's used for stream decryption.
+func (s *StreamSigner) Write(p []byte) (n int, err error) {
+	n, err = s.W.Write(p)
+	if err != nil {
+		return n, err
+	}
+	_, err = s.wHash.Write(p[:n])
+	if err != nil {
+		return 0, err
+	}
+	s.wDone = s.wDone || n > 0
+	return n, nil
+}
+
+func signerHash(written bool, h sha3.ShakeHash) ([]byte, error) {
+	if !written || h == nil {
+		return nil, ErrHash
+	}
+	p := make([]byte, hashLength)
+	if _, err := h.Read(p); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// ReaderHashSum calculates and returns s.R hash.
+func (s *StreamSigner) ReaderHashSum() ([]byte, error) {
+	return signerHash(s.rDone, s.rHash)
+}
+
+// WriterHashSum calculates and returns s.W hash.
+func (s *StreamSigner) WriterHashSum() ([]byte, error) {
+	return signerHash(s.wDone, s.wHash)
+}
+
+// NewStreamSigner returns new StreamSigner.
+func NewStreamSigner(src io.Reader, dst io.Writer) *StreamSigner {
+	var srcHash, dstHash sha3.ShakeHash
+	if src != nil {
+		srcHash = sha3.NewShake256()
+	}
+	if dst != nil {
+		dstHash = sha3.NewShake256()
+	}
+	return &StreamSigner{
+		R:     src,
+		W:     dst,
+		rHash: srcHash,
+		wHash: dstHash,
+	}
 }
 
 // Random returns n-Random bytes.
@@ -153,7 +243,7 @@ func Text(secret, plainText string) (*Msg, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &Msg{v: cipherText, s: salt, h: h}
+	m := &Msg{v: cipherText, s: salt, kh: h}
 	m.encode(true)
 	return m, nil
 }
@@ -166,7 +256,7 @@ func DecryptText(secret string, m *Msg) (string, error) {
 		return "", err
 	}
 	key, hash := Key(secret, m.s)
-	if !hmac.Equal(hash, m.h) {
+	if !hmac.Equal(hash, m.kh) {
 		return "", ErrSecret
 	}
 	plainText, err := text.Decrypt(m.v, key)
@@ -177,7 +267,7 @@ func DecryptText(secret string, m *Msg) (string, error) {
 }
 
 // File encrypts content from src to a new file using the secret.
-// Salt and key hash are returned as Msg.Salt and Msg.Hash.
+// Salt and key hash are returned as Msg.Salt and Msg.KeyHash.
 // The name if new file will be stored in m.Value.
 func File(secret string, src io.Reader, base, name string) (*Msg, error) {
 	salt, err := Salt()
@@ -189,17 +279,24 @@ func File(secret string, src io.Reader, base, name string) (*Msg, error) {
 		return nil, fmt.Errorf("open file for ecryption: %w", err)
 	}
 	key, h := Key(secret, salt)
-	err = stream.Encrypt(src, dst, key)
+
+	signReader := NewStreamSigner(src, nil)
+	err = stream.Encrypt(signReader, dst, key)
 	if err != nil {
 		return nil, err
 	}
-	m := &Msg{s: salt, h: h, Value: dst.Name()}
+	dh, err := signReader.ReaderHashSum()
+	if err != nil {
+		return nil, err
+	}
+
+	m := &Msg{s: salt, kh: h, dh: dh, Value: dst.Name()}
 	m.encode(false)
 	return m, dst.Close()
 }
 
 // DecryptFile writes decrypted content of file with path from Msg.Value,
-// checking Msg.Hash to dst using the secret and Msg.Salt.
+// checking Msg.KeyHash to dst using the secret and Msg.Salt.
 func DecryptFile(secret string, m *Msg, dst io.Writer) error {
 	err := m.decode(false)
 	if err != nil {
@@ -210,12 +307,22 @@ func DecryptFile(secret string, m *Msg, dst io.Writer) error {
 		return fmt.Errorf("open file for decryption: %w", err)
 	}
 	key, hash := Key(secret, m.s)
-	if !hmac.Equal(hash, m.h) {
+	if !hmac.Equal(hash, m.kh) {
 		return ErrSecret
 	}
-	err = stream.Decrypt(src, dst, key)
+
+	signWriter := NewStreamSigner(nil, dst)
+	err = stream.Decrypt(src, signWriter, key)
 	if err != nil {
 		return err
+	}
+
+	dh, err := signWriter.WriterHashSum()
+	if err != nil {
+		return err
+	}
+	if !hmac.Equal(dh, m.dh) {
+		return ErrHash
 	}
 	return src.Close()
 }

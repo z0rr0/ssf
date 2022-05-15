@@ -20,7 +20,7 @@ func TestText(t *testing.T) {
 		t.Errorf("failed value=%s", m1.Value)
 	}
 	// decrypt
-	m2 := &Msg{Value: m1.Value, Salt: m1.Salt, Hash: m1.Hash}
+	m2 := &Msg{Value: m1.Value, Salt: m1.Salt, KeyHash: m1.KeyHash}
 	decrypted, err := DecryptText(secret, m2)
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestFile(t *testing.T) {
 		}
 	}()
 	// decrypt
-	m2 := &Msg{Salt: m1.Salt, Value: fileName, Hash: m1.Hash}
+	m2 := &Msg{Salt: m1.Salt, Value: fileName, KeyHash: m1.KeyHash, DataHash: m1.DataHash}
 	err = DecryptFile(secret, m2, &dst)
 	if err != nil {
 		t.Fatal(err)
