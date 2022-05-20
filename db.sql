@@ -18,7 +18,7 @@ CREATE INDEX IF NOT EXISTS `expired` ON `ssf` (`expired`, `number`);
 /*
 id - unique identifier UUID v4
 file - relative path to an encrypted file
-meta - encrypted file meta data, JSON {name, size, check sum}
+meta - encrypted file meta data, JSON {name, size, type, check sum}
 number - usage file counter
 salt_file - random salt for data
 salt_meta - random salt for file name
