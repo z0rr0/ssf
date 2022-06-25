@@ -29,16 +29,22 @@ func (CryptoRandSource) Int63() int64 {
 // Seed is fake CryptoRandSource Seed implementation for Source interface.
 func (CryptoRandSource) Seed(int64) {}
 
-// New returns a new random string with length `n`.
-func New(n int) string {
+// New returns a new random string with length `n` bytes.
+// String alphabet can empty, then default alphabet will be used.
+// It correctly works only with ASCII symbols.
+func New(n int, alphabet string) string {
+	if alphabet == "" {
+		alphabet = Alphabet
+	}
+
 	source := &CryptoRandSource{}
 	random := rand.New(source)
 
-	lenAlphabet := len(Alphabet)
+	sourceLen := len(alphabet)
 	container := make([]byte, n)
 
 	for i := range container {
-		container[i] = Alphabet[random.Intn(lenAlphabet)]
+		container[i] = alphabet[random.Intn(sourceLen)]
 	}
 	return string(container)
 }
